@@ -511,12 +511,34 @@ impl<T> Atomic<T> {
 }
 
 impl<T> fmt::Debug for Atomic<T> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    default fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        println!("&Atomic");
         let data = self.data.load(Ordering::SeqCst);
         let (raw, tag) = decompose_data::<T>(data);
 
         f.debug_struct("Atomic")
             .field("raw", &raw)
+            .field("tag", &tag)
+            .finish()
+    }
+}
+
+impl<T: fmt::Debug> fmt::Debug for Atomic<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        println!("Atomic with debug");
+        let g = super::pin();
+        let data = self.data.load(Ordering::SeqCst);
+        let (raw, tag) = decompose_data::<T>(data);
+
+        let shared = self.load(Ordering::SeqCst, &g);
+        let inner = if shared.is_null() {
+            &"null" as &dyn fmt::Debug
+        } else {
+            unsafe { shared.deref() as &dyn fmt::Debug }
+        };
+        f.debug_struct("Atomic")
+            .field("raw", &raw)
+            .field("inner", inner)
             .field("tag", &tag)
             .finish()
     }
@@ -763,13 +785,33 @@ impl<T> Drop for Owned<T> {
 }
 
 impl<T> fmt::Debug for Owned<T> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    default fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let (raw, tag) = decompose_data::<T>(self.data);
 
         f.debug_struct("Owned")
             .field("raw", &raw)
             .field("tag", &tag)
             .finish()
+    }
+}
+
+impl<T: fmt::Debug> fmt::Debug for Owned<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let (raw, tag) = decompose_data::<T>(self.data);
+
+        unsafe {
+            let shared: Shared<T> = Shared::from_usize(self.data);
+            let inner = if shared.is_null() {
+                &"null" as &dyn fmt::Debug
+            } else {
+                shared.deref() as &dyn fmt::Debug
+            };
+            f.debug_struct("Owned")
+                .field("raw", &raw)
+                .field("inner", inner)
+                .field("tag", &tag)
+                .finish()
+        }
     }
 }
 
@@ -1163,11 +1205,27 @@ impl<'g, T> Ord for Shared<'g, T> {
 }
 
 impl<'g, T> fmt::Debug for Shared<'g, T> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    default fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let (raw, tag) = decompose_data::<T>(self.data);
 
         f.debug_struct("Shared")
             .field("raw", &raw)
+            .field("tag", &tag)
+            .finish()
+    }
+}
+
+impl<'g, T: fmt::Debug> fmt::Debug for Shared<'g, T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let (raw, tag) = decompose_data::<T>(self.data);
+        let inner = if self.is_null() {
+            &"null" as &dyn fmt::Debug
+        } else {
+            unsafe { self.deref() as &dyn fmt::Debug }
+        };
+        f.debug_struct("Shared")
+            .field("raw", &raw)
+            .field("inner", inner)
             .field("tag", &tag)
             .finish()
     }
@@ -1187,8 +1245,8 @@ impl<'g, T> Default for Shared<'g, T> {
 
 #[cfg(test)]
 mod tests {
-    use super::Shared;
-
+    use super::{Atomic, Owned, Shared};
+    
     #[test]
     fn valid_tag_i8() {
         Shared::<i8>::null().with_tag(0);
@@ -1197,5 +1255,22 @@ mod tests {
     #[test]
     fn valid_tag_i64() {
         Shared::<i64>::null().with_tag(7);
+    }
+
+    #[test]
+    fn debug_atomic_specialization() {
+        struct NonDebug();
+
+        let x = Atomic::new("hello");
+        let y = Atomic::new(NonDebug);
+
+        let g = ::default::pin();
+
+        println!("{:?}", x);
+        println!("{:?}", y);
+        println!("{:?}", Owned::new(1010220));
+        println!("{:?}", Owned::new(NonDebug));
+        println!("{:?}", Owned::new(1010).into_shared(&g));
+        println!("{:?}", Owned::new(NonDebug).into_shared(&g));
     }
 }

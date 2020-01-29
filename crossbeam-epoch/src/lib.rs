@@ -59,6 +59,8 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 #![cfg_attr(feature = "nightly", feature(cfg_target_has_atomic))]
 
+#![feature(specialization)]
+
 #[macro_use]
 extern crate cfg_if;
 #[cfg(feature = "std")]
